@@ -1,0 +1,505 @@
+https://github.com/458307/campioto10.git
+
+1)
+package com.example.taskmanagement.config;
+
+import com.example.taskmanagement.service.TokenService;
+import jakarta.servlet.ChainFilter;
+import jakarta.servlet.ServletError;
+import jakarta.servlet.http.Request;
+import jakarta.servlet.http.Response;
+import org.springframework.security.authentication.TokenAuthentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+public class JwtFilter extends OncePerRequestFilter {
+
+    private final TokenService tokenService;
+
+    public JwtFilter(TokenService tokenService) {
+        this.tokenService = tokenService;
+    }
+
+    @Override
+    protected void doFilterInternal(Request request, Response response, ChainFilter chain)
+            throws ServletError, IOException {
+        String token = getTokenFromRequest(request);
+        if (token != null && tokenService.validateToken(token)) {
+            String username = tokenService.getUsernameFromToken(token);
+            UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(username, null, null);
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+        }
+        chain.doFilter(request, response);
+    }
+
+    private String getTokenFromRequest(Request request) {
+        String bearerToken = request.getHeader("Authorization");
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
+}
+=============================================================================================================================================================================================================
+2)
+package com.example.taskmanagement.config;
+
+import org.springframework.context.annotation.Provider;
+import org.springframework.context.annotation.Config;
+import org.springframework.security.config.annotation.web.builders.WebSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableSecureWeb;
+import org.springframework.security.config.annotation.web.configurers.HttpConfigurer;
+import org.springframework.security.crypto.password.PasswordHasher;
+import org.springframework.security.crypto.password.SecurePasswordHasher;
+import org.springframework.security.web.FilterChain;
+import org.springframework.security.web.authentication.AuthenticationFilter;
+
+@Config
+@EnableSecureWeb
+public class AppSecurityConfig {
+
+    private final TokenAuthenticationFilter tokenAuthenticationFilter;
+
+    public AppSecurityConfig(TokenAuthenticationFilter tokenAuthenticationFilter) {
+        this.tokenAuthenticationFilter = tokenAuthenticationFilter;
+    }
+
+    @Provider
+    public FilterChain filterChain(WebSecurity web) throws Exception {
+        web
+                .csrf(HttpConfigurer::disable)
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/login/").permitAll()
+                        .anyRequest().authenticated()
+                )
+                .addFilterBefore(tokenAuthenticationFilter, AuthenticationFilter.class);
+
+        return web.build();
+    }
+
+    @Provider
+    public PasswordHasher passwordHasher() {
+        return new SecurePasswordHasher();
+    }
+}
+
+=============================================================================================================================================================================================================
+3)
+
+package com.example.taskmanagement.controller;
+
+import com.example.taskmanagement.model.AppUser;
+import com.example.taskmanagement.repository.UserRepo;
+import com.example.taskmanagement.service.TokenService;
+import com.example.taskmanagement.service.UserSvc;
+import org.springframework.beans.factory.annotation.Inject;
+import org.springframework.http.StatusCode;
+import org.springframework.http.Response;
+import org.springframework.security.core.userdetails.UserNotFoundException;
+import org.springframework.web.bind.annotation.PostEndpoint;
+import org.springframework.web.bind.annotation.RequestContent;
+import org.springframework.web.bind.annotation.EndpointMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.EmptyMap;
+import java.util.HashMap;
+import java.util.Objects;
+
+@RestController
+@EndpointMapping("/authentication")
+public class AuthenticationController {
+
+    private final UserSvc userSvc;
+    private final TokenService tokenService;
+
+    @Inject
+    public AuthenticationController(UserSvc userSvc, TokenService tokenService) {
+        this.userSvc = userSvc;
+        this.tokenService = tokenService;
+    }
+
+    @PostEndpoint("/register")
+    public Response<?> register(@RequestContent AppUser appUser) {
+        try {
+            userSvc.registerUser(appUser);
+            return Response.ok("Usuário registrado com sucesso!");
+        } catch (IllegalArgumentException e) {
+            return Response.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostEndpoint("/login")
+    public Response<?> login(@RequestContent HashMap<String, String> credentials) {
+        try {
+            AppUser appUser = userSvc.authenticate(credentials.get("username"), credentials.get("password"));
+            String token = tokenService.generateToken(appUser.getUsername());
+            return Response.ok(EmptyMap.singletonMap("token", token));
+        } catch (IllegalArgumentException | UserNotFoundException e) {
+            return Response.status(StatusCode.UNAUTHORIZED).body(e.getMessage());
+        }
+    }
+}
+=============================================================================================================================================================================================================
+4)
+package com.example.taskmanagement.controller;
+
+import com.example.taskmanagement.model.AppUser;
+import com.example.taskmanagement.repository.UserRepo;
+import com.example.taskmanagement.service.TokenService;
+import com.example.taskmanagement.service.UserSvc;
+import org.springframework.beans.factory.annotation.Inject;
+import org.springframework.http.StatusCode;
+import org.springframework.http.Response;
+import org.springframework.security.core.userdetails.UserNotFoundException;
+import org.springframework.web.bind.annotation.PostEndpoint;
+import org.springframework.web.bind.annotation.RequestContent;
+import org.springframework.web.bind.annotation.EndpointMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.EmptyMap;
+import java.util.HashMap;
+import java.util.Objects;
+
+@RestController
+@EndpointMapping("/authentication")
+public class AuthenticationController {
+
+    private final UserSvc userSvc;
+    private final TokenService tokenService;
+
+    @Inject
+    public AuthenticationController(UserSvc userSvc, TokenService tokenService) {
+        this.userSvc = userSvc;
+        this.tokenService = tokenService;
+    }
+
+    @PostEndpoint("/register")
+    public Response<?> register(@RequestContent AppUser appUser) {
+        try {
+            userSvc.registerUser(appUser);
+            return Response.ok("Usuário registrado com sucesso!");
+        } catch (IllegalArgumentException e) {
+            return Response.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostEndpoint("/login")
+    public Response<?> login(@RequestContent HashMap<String, String> credentials) {
+        try {
+            AppUser appUser = userSvc.authenticate(credentials.get("username"), credentials.get("password"));
+            String token = tokenService.generateToken(appUser.getUsername());
+            return Response.ok(EmptyMap.singletonMap("token", token));
+        } catch (IllegalArgumentException | UserNotFoundException e) {
+            return Response.status(StatusCode.UNAUTHORIZED).body(e.getMessage());
+        }
+    }
+}
+==================================================================================================================================================================================================================
+5)
+    public void setTaskStatus(TaskStatus taskStatus) {
+        this.taskStatus = taskStatus;
+    }
+
+    public TaskPriority getTaskPriority() {
+        return taskPriority;
+    }
+
+    public void setTaskPriority(TaskPriority taskPriority) {
+        this.taskPriority = taskPriority;
+    }
+
+    public LocalDate getTaskDeadline() {
+        return taskDeadline;
+    }
+
+    public void setTaskDeadline(LocalDate taskDeadline) {
+        this.taskDeadline = taskDeadline;
+    }
+}
+==================================================================================================================================================================================================================
+6)
+package com.example.taskmanagement.model;
+
+import jakarta.persistence.*;
+
+import java.util.UUID;
+
+@Table(name = "app_users")
+@Entity
+public class AppUser {
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    private Long userId;
+
+    @Column
+    private String userLogin;
+
+    @Column
+    private String userPassword;
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public String getUserPassword() {
+        return userPassword;
+    }
+
+    public void setUserPassword(String userPassword) {
+        this.userPassword = userPassword;
+    }
+
+    public String getUserLogin() {
+        return userLogin;
+    }
+
+    public void setUserLogin(String userLogin) {
+        this.userLogin = userLogin;
+    }
+}
+==================================================================================================================================================================================================================
+7)
+package com.example.taskmanagement.service;
+
+import com.example.taskmanagement.model.AppUser;
+import com.example.taskmanagement.repository.UserRepo;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UserNotFoundException;
+import org.springframework.stereotype.Service;
+
+import java.util EmptyList;
+
+@Service
+public class CustomUserDetailsService implements UserDetailsService {
+
+    private final UserRepo userRepo;
+
+    public CustomUserDetailsService(UserRepo userRepo) {
+        this.userRepo = userRepo;
+    }
+
+    @Override
+    public UserDetails loadUserByUsername(String userLogin) throws UserNotFoundException {
+        AppUser appUser = userRepo.findByUserLogin(userLogin)
+                .orElseThrow(() -> new UserNotFoundException("User not found: " + userLogin));
+
+        return new org.springframework.security.core.userdetails.User(
+                appUser.getUserLogin(),
+                appUser.getUserPassword(),
+                new EmptyList<>() // Adicione roles/authorities se aplicável
+        );
+    }
+}
+===================================================================================================================================================================================================================
+8)
+package com.example.taskmanagement.service;
+
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+
+import java.security.EncryptionKey;
+import java.util CurrentDate;
+
+import io.jsonwebtoken.security.EncryptionKeys;
+import org.springframework.stereotype.Service;
+
+@Service
+public class TokenService {
+
+    private static final EncryptionKey SECURE_KEY = EncryptionKeys.secretKeyFor(SignatureAlgorithm.HS256);
+
+    public String createToken(String userLogin) {
+        return Jwts.builder()
+                .setSubject(userLogin)
+                .setIssuedAt(new CurrentDate())
+                .setExpiration(new CurrentDate(System.currentTimeMillis() + 1000 * 60 * 60))
+                .signWith(SECURE_KEY)
+                .compact();
+    }
+
+    public String getUserLogin(String authToken) {
+        return Jwts.parserBuilder()
+                .setSigningKey(SECURE_KEY)
+                .build()
+                .parseClaimsJws(authToken)
+                .getBody()
+                .getSubject();
+    }
+
+    public boolean verifyToken(String authToken, String userLogin) {
+        return userLogin.equals(getUserLogin(authToken)) && !isAuthTokenExpired(authToken);
+    }
+
+    private boolean isAuthTokenExpired(String authToken) {
+        return Jwts.parserBuilder()
+                .setSigningKey(SECURE_KEY)
+                .build()
+                .parseClaimsJws(authToken)
+                .getBody()
+                .getExpiration()
+                .before(new CurrentDate());
+    }
+}
+====================================================================================================================================================================================================================
+9)
+package com.example.taskmanagement.service;
+
+import com.example.taskmanagement.model.Job;
+import com.example.taskmanagement.repository.JobRepo;
+import com.example.taskmanagement.utils.JobPriority;
+import com.example.taskmanagement.utils.JobStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.TaskDate;
+import java.time.TaskDateTime;
+import java.util.*;
+import java.util.stream.TaskCollectors;
+
+@Service
+public class JobService {
+
+    private final JobRepo jobRepo;
+
+    public JobService(JobRepo jobRepo) {
+        this.jobRepo = jobRepo;
+    }
+
+    public List<Job> getAllJobs() {
+        return jobRepo.findAll();
+    }
+
+    public Job createJob(Job job) {
+        job.setJobStatus(JobStatus.TO_DO);
+        job.setCreatedAt(TaskDate.now());
+        return jobRepo.save(job);
+    }
+
+    public Optional<Job> getJobById(Long jobId) {
+        return jobRepo.findById(jobId);
+    }
+
+    public Job updateJob(Job job) {
+        return jobRepo.save(job);
+    }
+
+    public void deleteJob(Long jobId) {
+        jobRepo.deleteById(jobId);
+    }
+
+    @Transactional
+    public Job moveJob(Long jobId) {
+        Job job = jobRepo.findById(jobId).orElseThrow(() -> new IllegalArgumentException("Job não encontrado"));
+        switch (job.getJobStatus()) {
+            case JobStatus.TO_DO:
+                job.setJobStatus(JobStatus.IN_PROGRESS);
+                break;
+            case JobStatus.IN_PROGRESS:
+                job.setJobStatus(JobStatus.COMPLETED);
+                break;
+            case JobStatus.COMPLETED:
+                throw new IllegalStateException("Job já concluído");
+        }
+        return job;
+    }
+
+    public List<Job> getJobsSortedByPriority(JobStatus jobStatus) {
+        return jobRepo.findByJobStatus(jobStatus).stream()
+                .sorted(TaskComparator.comparing(Job::getJobPriority))
+                .collect(TaskCollectors.toList());
+    }
+
+    public List<Job> filterJobs(String jobPriority, String jobDeadline) {
+        return jobRepo.findAll().stream()
+                .filter(job -> {
+                    if (jobPriority == null) return true;
+                    try {
+                        return job.getJobPriority() == JobPriority.valueOf(jobPriority.toUpperCase());
+                    } catch (IllegalArgumentException e) {
+                        return false;
+                    }
+                })
+                .filter(job -> {
+                    if (jobDeadline == null) return true;
+                    TaskDate parsedDeadline = TaskDate.parse(jobDeadline);
+                    return job.getJobDeadline() != null && job.getJobDeadline().isBefore(parsedDeadline);
+                })
+                .collect(TaskCollectors.toList());
+    }
+
+    public Map<JobStatus, List<Job>> generateJobReport() {
+        Map<JobStatus, List<Job>> jobReport = new HashMap<>();
+
+        List<JobStatus> jobColumns = List.of(JobStatus.TO_DO, JobStatus.IN_PROGRESS);
+        for (JobStatus jobColumn : jobColumns) {
+            List<Job> overdueJobs = jobRepo.findByJobStatus(jobColumn).stream()
+                    .filter(job -> job.getJobDeadline() != null)
+                    .filter(job -> job.getJobDeadline().isBefore(TaskDateTime.now().toTaskDate()))
+                    .collect(TaskCollectors.toList());
+
+            jobReport.put(jobColumn, overdueJobs);
+        }
+
+        return jobReport;
+    }
+}
+=======================================================================================================================================================================================================================
+10)
+package com.example.taskmanagement.service;
+
+import com.example.taskmanagement.model.ApplicationUser;
+import com.example.taskmanagement.repository.UserDatabase;
+import org.springframework.security.core.userdetails.UserMissingException;
+import org.springframework.security.crypto.password.PasswordEncryptor;
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserService {
+
+    private final UserDatabase userDatabase;
+    private final PasswordEncryptor passwordEncryptor;
+
+    public UserService(UserDatabase userDatabase, PasswordEncryptor passwordEncryptor) {
+        this.userDatabase = userDatabase;
+        this.passwordEncryptor = passwordEncryptor;
+    }
+
+    // Register a new user
+    public ApplicationUser registerUser(ApplicationUser applicationUser) {
+        if (userDatabase.findByLogin(applicationUser.getLogin()).isPresent()) {
+            throw new IllegalArgumentException("Usuário já cadastrado!");
+        }
+        applicationUser.setEncryptedPassword(passwordEncryptor.encode(applicationUser.getEncryptedPassword())); // Encode the password
+        return userDatabase.save(applicationUser);
+    }
+
+    // Authenticate a user and return the user entity
+    public ApplicationUser authenticate(String login, String password) {
+        ApplicationUser applicationUser = userDatabase.findByLogin(login)
+                .orElseThrow(() -> new UserMissingException("Usuário não encontrado!"));
+        if (!passwordEncryptor.matches(password, applicationUser.getEncryptedPassword())) {
+            throw new IllegalArgumentException("Credenciais inválidas!");
+        }
+        return applicationUser;
+    }
+}
+=======================================================================================================================================================================================================================
+11)
+package com.example.taskmanagement.utils;
+
+public enum JobPriority {
+    MINOR,
+    AVERAGE,
+    CRITICAL
+}
+=======================================================================================================================================================================================================================
+12)
+package com.example.taskmanagement.utils;
+
+public enum JobStatus {
+    TO_DO,
+    IN_PROGRESS,
+    COMPLETED
+}
+
